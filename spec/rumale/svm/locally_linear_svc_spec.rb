@@ -2,21 +2,17 @@
 
 require 'spec_helper'
 
-RSpec.describe Rumale::SVM::LinearSVC do
+RSpec.describe Rumale::SVM::LocallyLinearSVC do
   let(:x) { dataset[0] }
   let(:y) { dataset[1] }
   let(:n_samples) { x.shape[0] }
   let(:n_features) { x.shape[1] }
   let(:n_classes) { y.to_a.uniq.size }
-  let(:penalty) { 'l2' }
-  let(:loss) { 'squared_hinge' }
-  let(:dual) { false }
+  let(:n_anchors) { 128 }
   let(:fit_bias) { true }
-  let(:svc) { described_class.new(penalty: penalty, loss: loss, dual: dual, fit_bias: fit_bias, probability: true, random_seed: 1) }
+  let(:svc) { described_class.new(n_anchors: n_anchors, fit_bias: fit_bias, random_seed: 1) }
   let(:dfs) { svc.decision_function(x) }
   let(:predicted) { svc.predict(x) }
-  let(:probs) { svc.predict_proba(x) }
-  let(:predict_pr) { Numo::Int32[*Array.new(n_samples) { |n| probs[n, true].max_index }] + 1 }
   let(:copied) { Marshal.load(Marshal.dump(svc)) }
 
   shared_examples 'multiclass classification task' do
@@ -24,12 +20,14 @@ RSpec.describe Rumale::SVM::LinearSVC do
 
     it 'evaluates classification performance', :aggregate_failures do
       expect(svc.weight_vec.class).to eq(Numo::DFloat)
-      expect(svc.weight_vec.ndim).to eq(2)
+      expect(svc.weight_vec.ndim).to eq(3)
       expect(svc.weight_vec.shape[0]).to eq(n_classes)
-      expect(svc.weight_vec.shape[1]).to eq(n_features)
+      expect(svc.weight_vec.shape[1]).to eq(n_anchors)
+      expect(svc.weight_vec.shape[2]).to eq(n_features)
       expect(svc.bias_term.class).to eq(Numo::DFloat)
-      expect(svc.bias_term.ndim).to eq(1)
+      expect(svc.bias_term.ndim).to eq(2)
       expect(svc.bias_term.shape[0]).to eq(n_classes)
+      expect(svc.bias_term.shape[1]).to eq(n_anchors)
       expect(svc.score(x, y)).to eq(1.0)
       expect(predicted.class).to eq(Numo::Int32)
       expect(predicted.ndim).to eq(1)
@@ -43,18 +41,10 @@ RSpec.describe Rumale::SVM::LinearSVC do
       expect(dfs.shape[1]).to eq(n_classes)
     end
 
-    it 'predicts class probabilities', :aggregate_failures do
-      expect(probs.class).to eq(Numo::DFloat)
-      expect(probs.ndim).to eq(2)
-      expect(probs.shape[0]).to eq(n_samples)
-      expect(probs.shape[1]).to eq(n_classes)
-      expect(predict_pr).to eq(y)
-    end
-
     it 'dumps and restores itself using Marshal module', :aggregate_failures do
-      expect(copied.instance_variable_get(:@model)).to eq(svc.instance_variable_get(:@model))
-      expect(copied.instance_variable_get(:@prob_param)).to eq(svc.instance_variable_get(:@prob_param))
       expect(copied.params).to eq(svc.params)
+      expect(copied.classes).to eq(svc.classes)
+      expect(copied.anchors).to eq(svc.anchors)
       expect(copied.weight_vec).to eq(svc.weight_vec)
       expect(copied.bias_term).to eq(svc.bias_term)
       expect(copied.score(x, y)).to eq(svc.score(x, y))
@@ -66,9 +56,12 @@ RSpec.describe Rumale::SVM::LinearSVC do
 
     it 'evaluates classification performance', :aggregate_failures do
       expect(svc.weight_vec.class).to eq(Numo::DFloat)
-      expect(svc.weight_vec.ndim).to eq(1)
-      expect(svc.weight_vec.shape[0]).to eq(n_features)
-      expect(svc.bias_term.class).to eq(Float)
+      expect(svc.weight_vec.ndim).to eq(2)
+      expect(svc.weight_vec.shape[0]).to eq(n_anchors)
+      expect(svc.weight_vec.shape[1]).to eq(n_features)
+      expect(svc.bias_term.class).to eq(Numo::DFloat)
+      expect(svc.bias_term.ndim).to eq(1)
+      expect(svc.bias_term.shape[0]).to eq(n_anchors)
       expect(svc.score(x, y)).to eq(1.0)
       expect(predicted.class).to eq(Numo::Int32)
       expect(predicted.ndim).to eq(1)
@@ -81,17 +74,10 @@ RSpec.describe Rumale::SVM::LinearSVC do
       expect(dfs.shape[0]).to eq(n_samples)
     end
 
-    it 'predicts class probabilities', :aggregate_failures do
-      expect(probs.class).to eq(Numo::DFloat)
-      expect(probs.ndim).to eq(2)
-      expect(probs.shape[0]).to eq(n_samples)
-      expect(probs.shape[1]).to eq(n_classes)
-      expect(predict_pr).to eq(y)
-    end
-
     it 'dumps and restores itself using Marshal module', :aggregate_failures do
-      expect(copied.instance_variable_get(:@params)).to eq(svc.instance_variable_get(:@params))
-      expect(copied.instance_variable_get(:@model)).to eq(svc.instance_variable_get(:@model))
+      expect(copied.params).to eq(svc.params)
+      expect(copied.classes).to eq(svc.classes)
+      expect(copied.anchors).to eq(svc.anchors)
       expect(copied.weight_vec).to eq(svc.weight_vec)
       expect(copied.bias_term).to eq(svc.bias_term)
       expect(copied.score(x, y)).to eq(svc.score(x, y))
@@ -119,49 +105,12 @@ RSpec.describe Rumale::SVM::LinearSVC do
 
     it_behaves_like 'multiclass classification task'
     it_behaves_like 'hold out'
-
-    context 'when selected dual solver' do
-      let(:dual) { true }
-
-      it_behaves_like 'multiclass classification task'
-      it_behaves_like 'hold out'
-    end
-
-    context 'when selected hinge loss' do
-      let(:loss) { 'hinge' }
-
-      it_behaves_like 'multiclass classification task'
-      it_behaves_like 'hold out'
-    end
-
-    context 'when selected l1 penalty' do
-      let(:penalty) { 'l1' }
-
-      it_behaves_like 'multiclass classification task'
-      it_behaves_like 'hold out'
-    end
   end
 
   context 'when given binary class dataset' do
-    let(:dataset) { two_balls }
+    let(:dataset) { two_moons }
 
     it_behaves_like 'binary classification task'
     it_behaves_like 'hold out'
-  end
-
-  context 'when called predict method before training with fit method' do
-    let(:dataset) { two_balls }
-
-    it 'raises Runtime error', :aggregate_failures do
-      expect { svc.predict(x) }.to raise_error(
-        RuntimeError, 'Rumale::SVM::LinearSVC#predict expects to be called after training the model with the fit method.'
-      )
-      expect { svc.predict_proba(x) }.to raise_error(
-        RuntimeError, 'Rumale::SVM::LinearSVC#predict_proba expects to be called after training the model with the fit method.'
-      )
-      expect { svc.decision_function(x) }.to raise_error(
-        RuntimeError, 'Rumale::SVM::LinearSVC#decision_function expects to be called after training the model with the fit method.'
-      )
-    end
   end
 end

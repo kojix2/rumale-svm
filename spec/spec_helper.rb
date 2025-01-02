@@ -1,25 +1,18 @@
 # frozen_string_literal: true
 
 require 'simplecov'
-require 'simplecov-lcov'
-
-SimpleCov::Formatter::LcovFormatter.config do |config|
-  config.report_with_single_file = true
-  config.single_report_path = 'coverage/lcov.info'
-end
-
-SimpleCov.formatter = SimpleCov::Formatter::MultiFormatter.new(
-  [SimpleCov::Formatter::HTMLFormatter, SimpleCov::Formatter::LcovFormatter]
-)
-
 SimpleCov.start
 
 require 'bundler/setup'
 require 'rumale/svm'
 require 'rumale/utils'
+require 'rumale/dataset'
 require 'rumale/pairwise_metric'
 require 'rumale/model_selection/stratified_k_fold'
 require 'rumale/model_selection/k_fold'
+require 'lbfgsb'
+require 'numo/tiny_linalg'
+Numo::Linalg = Numo::TinyLinalg unless defined?(Numo::Linalg)
 
 def xor_data(n_samples = 1000)
   rng = Random.new(1)
@@ -68,6 +61,10 @@ def two_balls(n_samples = 1000)
   y = Numo::NArray.concatenate([Numo::Int32.zeros(pos_clstr_size) + 1,
                                 Numo::Int32.zeros(neg_clstr_size) + 2])
   [x, y]
+end
+
+def two_moons(n_samples = 1000)
+  Rumale::Dataset.make_moons(n_samples, random_seed: 1)
 end
 
 RSpec.configure do |config|
